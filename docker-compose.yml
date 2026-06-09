@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: core-rivals-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: core-rivals-postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-corerivalsuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-corerivalspass}
+      POSTGRES_DB: ${POSTGRES_DB:-corerivalsdb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:
+
+# Usage:
+#   docker compose up -d        → start Redis + PostgreSQL
+#   docker compose down         → stop
+#   docker compose down -v      → stop and delete data
+#
+# Note: Phase 2 does NOT require docker. Redis and PostgreSQL
+# are used from Phase 3+ onwards.
