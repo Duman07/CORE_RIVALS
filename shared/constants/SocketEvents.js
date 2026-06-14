@@ -11,6 +11,9 @@ export const GAME_COMBAT            = 'game:combat';
 export const GAME_PICKUP            = 'game:pickup';
 export const GAME_DROP              = 'game:drop';
 export const GAME_STEAL             = 'game:steal';
+// Phase 6 — Combat
+export const GAME_PUSH              = 'game:push';     // C→S: { targetId: string }
+export const GAME_BLOCK             = 'game:block';    // C→S: { active: boolean }
 
 // ─── Server → Client ─────────────────────────────────────────────────────────
 export const LOBBY_CREATED          = 'lobby:created';
@@ -27,3 +30,5 @@ export const MATCH_ITEM_DROPPED     = 'match:item_dropped';
 export const MATCH_ITEM_SPAWNED     = 'match:item_spawned';
 export const MATCH_END              = 'match:end';
 export const MATCH_SCORE            = 'match:score';   // { coreIndex, scores }
+// Phase 6 — Combat
+export const MATCH_PUSH             = 'match:push';    // S→C: { pusherId, targetId, blocked, disarmed }

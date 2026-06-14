@@ -1,18 +1,19 @@
 /**
  * PhysicsWorld — Rapier physics world for one GameSession.
  *
- * Entities:
- *   Players  → KinematicPositionBased + Capsule collider
- *              Moved by setting next kinematic translation each tick.
- *              Rapier's kinematic→dynamic coupling makes them push the ball.
- *   Ball     → Dynamic + Ball collider
- *              Responds to gravity, friction, and player contacts.
- *   Floor    → Fixed + Cuboid — ball bounces on it.
- *   Walls    → 4 Fixed Cuboids at ±25m — ball bounces off them.
+ * Phase 5 balance pass:
+ *   - Collision groups isolate ball from player bodies.
+ *     The ONLY way to move the ball is via applyBallImpulse() (GAME_SWING).
+ *     Player capsules no longer generate contact forces on the ball collider.
+ *   - Ball density raised 5× (mass ≈ 0.33 kg) → Δv ≈ 7.6 m/s at full swing.
+ *   - linearDamping raised → ball decelerates faster, stays in arena.
+ *   - angularDamping raised → less rolling, more predictable stop.
+ *   - restitution lowered → less erratic wall bouncing.
  *
- * Core scoring is NOT done via Rapier sensors.
- * GameSession performs a manual Euclidean distance check each tick,
- * which is simpler, cheaper, and fully deterministic.
+ * Collision group encoding (Rapier InteractionGroups):
+ *   bits 16-31 = membership  (which group this collider belongs to)
+ *   bits  0-15 = filter      (which memberships this collider collides WITH)
+ *   Contact generated only when (A.filter & B.membership) AND (B.filter & A.membership).
  */
 
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -21,10 +22,22 @@ import {
   BALL_SPAWN,
 } from '@core-rivals/shared/constants/GameConstants';
 
-// Player capsule dimensions
+// ─── Collision groups ────────────────────────────────────────────────────────
+const GRP_PLAYER = 0x0001; // bit 0
+const GRP_BALL   = 0x0002; // bit 1
+const GRP_WORLD  = 0x0004; // bit 2
+
+/** Player capsule: belongs to PLAYER, collides with WORLD + PLAYER — NOT ball */
+const CGRP_PLAYER = (GRP_PLAYER << 16) | (GRP_WORLD | GRP_PLAYER);
+/** Ball: belongs to BALL, collides with WORLD only — NOT players */
+const CGRP_BALL   = (GRP_BALL   << 16) | GRP_WORLD;
+/** Floor/Walls: belongs to WORLD, collides with PLAYER + BALL */
+const CGRP_WORLD  = (GRP_WORLD  << 16) | (GRP_PLAYER | GRP_BALL);
+
+// ─── Player capsule dimensions ───────────────────────────────────────────────
 const CAPSULE_HALF_HEIGHT = 0.45;   // cylinder half-length
 const CAPSULE_RADIUS      = 0.40;   // sphere radius
-const PLAYER_Y            = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS; // 0.85 — capsule centre height
+const PLAYER_Y            = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS; // 0.85
 
 export class PhysicsWorld {
   constructor() {
@@ -46,16 +59,14 @@ export class PhysicsWorld {
     this._buildBall();
 
     this._ready = true;
-    console.log('[PhysicsWorld] Initialised');
+    console.log('[PhysicsWorld] Initialised (balance pass: collision groups active)');
   }
 
   // ─── Player bodies ──────────────────────────────────────────────────────────
 
   /**
    * Register a player kinematic body at spawn position.
-   * @param {string} socketId
-   * @param {number} x
-   * @param {number} z
+   * Capsule uses CGRP_PLAYER — will NOT contact the ball collider.
    */
   addPlayer(socketId, x, z) {
     if (!this._ready) return;
@@ -64,29 +75,19 @@ export class PhysicsWorld {
       .setTranslation(x, PLAYER_Y, z);
     const body = this._world.createRigidBody(desc);
     this._world.createCollider(
-      RAPIER.ColliderDesc.capsule(CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS),
+      RAPIER.ColliderDesc.capsule(CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS)
+        .setCollisionGroups(CGRP_PLAYER),
       body,
     );
     this._playerBodies.set(socketId, body);
   }
 
-  /**
-   * Set the kinematic target translation for next world.step().
-   * @param {string} socketId
-   * @param {number} x
-   * @param {number} z
-   */
   movePlayer(socketId, x, z) {
     const body = this._playerBodies.get(socketId);
     if (!body) return;
     body.setNextKinematicTranslation({ x, y: PLAYER_Y, z });
   }
 
-  /**
-   * Read player position AFTER world.step() resolves collisions.
-   * @param {string} socketId
-   * @returns {{ x:number, y:number, z:number } | null}
-   */
   getPlayerTranslation(socketId) {
     const body = this._playerBodies.get(socketId);
     return body ? body.translation() : null;
@@ -113,6 +114,17 @@ export class PhysicsWorld {
     this._ballBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 
+  // ─── Impulse ────────────────────────────────────────────────────────────────
+
+  /**
+   * Apply an instant impulse to the ball (N·s).
+   * Call BEFORE world.step() so Rapier incorporates it this tick.
+   */
+  applyBallImpulse(fx, fy, fz) {
+    if (!this._ballBody) return;
+    this._ballBody.applyImpulse({ x: fx, y: fy, z: fz }, true);
+  }
+
   // ─── Step ───────────────────────────────────────────────────────────────────
 
   step() {
@@ -124,7 +136,9 @@ export class PhysicsWorld {
   _buildFloor() {
     const body = this._world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     this._world.createCollider(
-      RAPIER.ColliderDesc.cuboid(30, 0.05, 30).setTranslation(0, -0.05, 0),
+      RAPIER.ColliderDesc.cuboid(30, 0.05, 30)
+        .setTranslation(0, -0.05, 0)
+        .setCollisionGroups(CGRP_WORLD),
       body,
     );
   }
@@ -141,21 +155,32 @@ export class PhysicsWorld {
       const body = this._world.createRigidBody(
         RAPIER.RigidBodyDesc.fixed().setTranslation(cx, cy, cz),
       );
-      this._world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz), body);
+      this._world.createCollider(
+        RAPIER.ColliderDesc.cuboid(hx, hy, hz)
+          .setCollisionGroups(CGRP_WORLD),
+        body,
+      );
     }
   }
 
   _buildBall() {
+    // Phase 5 balance pass:
+    //   density 5.0  → mass ≈ 0.33 kg (default 1.0 → 0.065 kg was too light)
+    //   linearDamping 1.0  → ~63% velocity loss per second; ball stops in ~7-8 m
+    //   angularDamping 1.5 → less rolling
+    //   restitution 0.35   → less erratic bouncing off walls
     const desc = RAPIER.RigidBodyDesc
       .dynamic()
       .setTranslation(BALL_SPAWN.x, BALL_SPAWN.y, BALL_SPAWN.z)
-      .setLinearDamping(0.6)
-      .setAngularDamping(0.6);
+      .setLinearDamping(1.0)
+      .setAngularDamping(1.5);
     this._ballBody = this._world.createRigidBody(desc);
     this._world.createCollider(
       RAPIER.ColliderDesc.ball(BALL_RADIUS)
-        .setRestitution(0.55)
-        .setFriction(0.4),
+        .setDensity(5.0)
+        .setRestitution(0.35)
+        .setFriction(0.5)
+        .setCollisionGroups(CGRP_BALL),
       this._ballBody,
     );
   }

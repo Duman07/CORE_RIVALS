@@ -103,9 +103,10 @@ export class NetworkSystem {
         tick:           snapshot.tick,
         local:          localData,
         remote:         remoteData,
-        bufferedInputs: [...this._inputBuffer],  // copy — caller may mutate
-        ball:           snapshot.ball   ?? null, // Phase 4: ball state
-        scores:         snapshot.scores ?? null, // Phase 4: score map
+        bufferedInputs: [...this._inputBuffer],
+        ball:           snapshot.ball   ?? null,
+        scores:         snapshot.scores ?? null,
+        items:          snapshot.items  ?? null,  // Phase 5: club positions + ownership
       });
     }
   }

@@ -97,3 +97,30 @@ export const CHARACTER_COLORS = {
   moises:    0x3498db,
   sebastian: 0x9b59b6,
 };
+
+// ─── Golf (Phase 5) ──────────────────────────────────────────────────────────
+// Club spawn points — between centre and each player spawn (~6–7 m radius)
+export const CLUB_SPAWN_POSITIONS = Object.freeze([
+  Object.freeze({ x:  0,    y: 0, z: -7   }),  // near slot 1 (north)
+  Object.freeze({ x:  6.06, y: 0, z:  3.5 }),  // near slot 2 (south-east)
+  Object.freeze({ x: -6.06, y: 0, z:  3.5 }),  // near slot 3 (south-west)
+]);
+
+export const SWING_MAX_IMPULSE   = 2.5;  // N·s — impulse at full power (−50% balance pass)
+export const SWING_LOFT_FACTOR   = 0.8;  // N·s upward component (−60% balance pass — less loft)
+export const SWING_REACH         = 3.5;  // m — max player↔ball dist for valid swing
+export const SWING_CHARGE_TIME   = 1.5;  // s — time from 0 to full charge (client)
+export const SWING_COOLDOWN_SECS = 1.5;  // s — cooldown between swings (server gate + client visual)
+
+// ─── Combat (Phase 6) ────────────────────────────────────────────────────────
+// Push displaces target by decaying velocity applied each tick.
+// total_displacement = PUSH_BASE_VELOCITY / (TICK_RATE × (1 − PUSH_DECAY_PER_TICK))
+//   normal push:  15 / (60 × 0.12) ≈ 2.1 m
+//   blocked push: 2.1 × 0.25      ≈ 0.5 m
+export const PUSH_MAX_DISTANCE   = 2.5;   // m — maximum push range
+export const PUSH_BASE_VELOCITY  = 15;    // m/s — initial push speed applied to target
+export const PUSH_DECAY_PER_TICK = 0.88;  // velocity multiplier per server tick
+export const PUSH_MIN_VELOCITY   = 0.1;   // m/s — stop threshold
+export const PUSH_COOLDOWN_SECS  = 2.0;   // s — between pushes (server-enforced)
+export const BLOCK_PUSH_FACTOR   = 0.25;  // push force multiplier when target is blocking
+export const BLOCK_MAX_DURATION  = 3.0;   // s — max continuous block (server-enforced)
