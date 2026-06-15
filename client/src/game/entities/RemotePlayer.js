@@ -28,6 +28,9 @@ export class RemotePlayer {
     /** @type {Array<{ time:number, x:number, y:number, z:number, yaw:number }>} */
     this._buffer = [];
 
+    /** Latest interpolated XZ (for ground sampling). */
+    this._pos = { x: initialPos?.x ?? 0, z: initialPos?.z ?? 0 };
+
     this._mesh = new PlayerMesh(scene, character, name, /* isLocal= */ false);
 
     if (initialPos) {
@@ -78,6 +81,7 @@ export class RemotePlayer {
       // renderTime is past the buffer — show the most recent known state
       const last = this._buffer.at(-1);
       this._mesh.setTransform(last.x, last.y, last.z, last.yaw);
+      this._pos = { x: last.x, z: last.z };
       return;
     }
 
@@ -95,6 +99,7 @@ export class RemotePlayer {
     const yaw = older.yaw + dyaw * t;
 
     this._mesh.setTransform(x, y, z, yaw);
+    this._pos = { x, z };
 
     // Prune states older than renderTime (keep one before for the next frame)
     while (this._buffer.length > 2 && this._buffer[1].time < renderTime) {
@@ -107,4 +112,13 @@ export class RemotePlayer {
   dispose() {
     this._mesh.dispose();
   }
+
+  // ─── Held item (GLB hand) ─────────────────────────────────────────────────────
+  get hasHandBone() { return this._mesh.hasHandBone; }
+  attachClub(obj)   { return this._mesh.attachToHand(obj); }
+  detachClub(obj)   { this._mesh.detachFromHand(obj); }
+
+  // ─── Terrain ──────────────────────────────────────────────────────────────────
+  get position()           { return this._pos; }
+  groundAlign(nx, ny, nz)  { this._mesh.applyGroundNormal(nx, ny, nz); }
 }

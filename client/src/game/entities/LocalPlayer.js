@@ -10,8 +10,10 @@
  *   • Server reconciliation   (reconcile)
  */
 
-import { applyMovement } from '@core-rivals/shared/movement/MovementUtils';
-import { PlayerMesh }    from './PlayerMesh.js';
+import { applyMovement }   from '@core-rivals/shared/movement/MovementUtils';
+import { terrainHeight }   from '@core-rivals/shared/terrain/TerrainUtils';
+import { CHARACTER_STATS } from '@core-rivals/shared/constants/GameConstants';
+import { PlayerMesh }      from './PlayerMesh.js';
 
 export class LocalPlayer {
   /**
@@ -28,6 +30,10 @@ export class LocalPlayer {
     this.position = { x: initialPos.x, y: 0, z: initialPos.z };
     this.yaw      = 0;
 
+    // Per-character movement speed multiplier (movilidad). Must match the server
+    // so client prediction and reconciliation stay in sync.
+    this._speedScale = CHARACTER_STATS[character]?.stats?.moveScale ?? 1;
+
     this._mesh = new PlayerMesh(scene, character, name, /* isLocal= */ true);
     this._syncMesh();
   }
@@ -42,8 +48,8 @@ export class LocalPlayer {
    * @param {number} dt — frame delta (seconds)
    */
   applyInput(input, dt) {
-    const next    = applyMovement(this.position, { ...input, dt });
-    this.position = { x: next.x, y: next.y, z: next.z };
+    const next    = applyMovement(this.position, { ...input, dt, speedScale: this._speedScale });
+    this.position = { x: next.x, y: terrainHeight(next.x, next.z), z: next.z };
     this.yaw      = next.yaw;
     this._syncMesh();
   }
@@ -63,10 +69,13 @@ export class LocalPlayer {
 
     // 2. Re-simulate inputs not yet processed by the server
     for (const input of bufferedInputs) {
-      const next    = applyMovement(this.position, input);
+      const next    = applyMovement(this.position, { ...input, speedScale: this._speedScale });
       this.position = { x: next.x, y: next.y, z: next.z };
       this.yaw      = next.yaw;
     }
+
+    // Keep feet on the shared terrain relief
+    this.position.y = terrainHeight(this.position.x, this.position.z);
 
     this._syncMesh();
   }
@@ -76,6 +85,14 @@ export class LocalPlayer {
   dispose() {
     this._mesh.dispose();
   }
+
+  // ─── Held item (GLB hand) ─────────────────────────────────────────────────────
+  get hasHandBone() { return this._mesh.hasHandBone; }
+  attachClub(obj)   { return this._mesh.attachToHand(obj); }
+  detachClub(obj)   { this._mesh.detachFromHand(obj); }
+
+  // ─── Terrain ──────────────────────────────────────────────────────────────────
+  groundAlign(nx, ny, nz) { this._mesh.applyGroundNormal(nx, ny, nz); }
 
   // ─── Private ────────────────────────────────────────────────────────────────
 

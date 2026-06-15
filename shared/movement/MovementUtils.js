@@ -27,6 +27,7 @@ import {
  */
 export function applyMovement(state, input) {
   const { dx, dz, sprint, yaw, dt } = input;
+  const speedScale = input.speedScale ?? 1;   // per-character movilidad multiplier (default 1)
 
   // Cap delta-time to prevent tunnelling on lag spikes
   const safeDt = Math.min(dt, 0.05);
@@ -41,7 +42,7 @@ export function applyMovement(state, input) {
   const ndx = dx / len;
   const ndz = dz / len;
 
-  const speed = sprint ? SPRINT_SPEED : MOVE_SPEED;
+  const speed = (sprint ? SPRINT_SPEED : MOVE_SPEED) * speedScale;
 
   // Rotate input from camera-local space to world space.
   // Forward (ndz=+1) moves toward (−sin yaw, 0, −cos yaw).

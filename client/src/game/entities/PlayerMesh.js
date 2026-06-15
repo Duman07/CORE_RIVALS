@@ -73,6 +73,7 @@ export class PlayerMesh {
     this._scene     = scene;
     this._character = character;
     this._isLocal   = isLocal;
+    this._handBone  = null;
 
     const color    = CHARACTER_COLORS[character] ?? 0x888888;
     this._fallback = buildCapsule(color);
@@ -88,8 +89,55 @@ export class PlayerMesh {
   }
 
   setTransform(x, y, z, yaw) {
+    this._yaw = yaw;
     this._root.position.set(x, y, z);
     this._root.rotation.y = yaw;
+  }
+
+  /**
+   * Tilt the character so its up-axis follows the ground slope normal,
+   * while preserving the current yaw. Normal comes from the GroundSampler.
+   */
+  applyGroundNormal(nx, ny, nz) {
+    const n = new THREE.Vector3(nx, ny, nz);
+    if (n.lengthSq() < 1e-6) return;
+    n.normalize();
+    const up    = new THREE.Vector3(0, 1, 0);
+    const qTilt = new THREE.Quaternion().setFromUnitVectors(up, n);
+    const qYaw  = new THREE.Quaternion().setFromAxisAngle(up, this._yaw ?? 0);
+    this._root.quaternion.copy(qTilt).multiply(qYaw);
+  }
+
+  // ─── Held item attachment (GLB hand bone) ─────────────────────────────────────
+
+  /** True once the GLB has loaded and a usable hand bone was found. */
+  get hasHandBone() { return this._handBone != null; }
+
+  /**
+   * Parent an Object3D (e.g. the golf club group) to the GLB's hand bone.
+   * Counter-scales by the bone's world scale so the club keeps real-world size.
+   * @returns {boolean} whether the attach succeeded
+   */
+  attachToHand(object3D) {
+    if (!this._handBone) return false;
+    const s = new THREE.Vector3();
+    this._handBone.getWorldScale(s);
+    const inv = 1 / (s.x || 1);
+    object3D.scale.setScalar(inv);
+    // Small local offset/orientation so the grip sits in the palm. Bone frames
+    // vary per rig, so these are sensible defaults to fine-tune visually.
+    object3D.position.set(0, 0.02 * inv, 0);
+    object3D.rotation.set(Math.PI / 2, 0, 0);
+    this._handBone.add(object3D);
+    return true;
+  }
+
+  /** Remove an attached Object3D from the hand bone and reset its transform. */
+  detachFromHand(object3D) {
+    if (object3D.parent) object3D.parent.remove(object3D);
+    object3D.scale.setScalar(1);
+    object3D.position.set(0, 0, 0);
+    object3D.rotation.set(0, 0, 0);
   }
 
   dispose() {
@@ -114,7 +162,8 @@ export class PlayerMesh {
 
       this._root.remove(this._fallback);
       this._root.add(model);
-      this._model = model;
+      this._model    = model;
+      this._handBone = this._findHandBone(model);
 
       const box = new THREE.Box3().setFromObject(model);
       this._label.position.y = (box.max.y > 0.1 ? box.max.y : 1.75) + 0.35;
@@ -123,6 +172,20 @@ export class PlayerMesh {
     } catch (err) {
       console.warn('[PlayerMesh] ' + character + ' fallo:', err?.message ?? err);
     }
+  }
+
+  _findHandBone(model) {
+    let right = null;
+    let any   = null;
+    model.traverse((o) => {
+      const isBone = o.isBone || o.type === 'Bone';
+      if (!isBone) return;
+      const n = (o.name || '').toLowerCase();
+      if (!n.includes('hand')) return;
+      if (n.includes('right') || n.includes('_r') || n.endsWith('r')) right = right || o;
+      any = any || o;
+    });
+    return right || any;
   }
 
   _applyConfig(model, config) {

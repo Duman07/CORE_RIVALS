@@ -21,6 +21,11 @@ import {
   BALL_RADIUS,
   BALL_SPAWN,
 } from '@core-rivals/shared/constants/GameConstants';
+import {
+  terrainHeight,
+  TERRAIN_SIZE,
+  TERRAIN_SEGMENTS,
+} from '@core-rivals/shared/terrain/TerrainUtils';
 
 // ─── Collision groups ────────────────────────────────────────────────────────
 const GRP_PLAYER = 0x0001; // bit 0
@@ -37,7 +42,7 @@ const CGRP_WORLD  = (GRP_WORLD  << 16) | (GRP_PLAYER | GRP_BALL);
 // ─── Player capsule dimensions ───────────────────────────────────────────────
 const CAPSULE_HALF_HEIGHT = 0.45;   // cylinder half-length
 const CAPSULE_RADIUS      = 0.40;   // sphere radius
-const PLAYER_Y            = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS; // 0.85
+const PLAYER_Y            = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS; // 0.85 — capsule centre above the feet
 
 export class PhysicsWorld {
   constructor() {
@@ -72,7 +77,7 @@ export class PhysicsWorld {
     if (!this._ready) return;
     const desc = RAPIER.RigidBodyDesc
       .kinematicPositionBased()
-      .setTranslation(x, PLAYER_Y, z);
+      .setTranslation(x, terrainHeight(x, z) + PLAYER_Y, z);
     const body = this._world.createRigidBody(desc);
     this._world.createCollider(
       RAPIER.ColliderDesc.capsule(CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS)
@@ -85,7 +90,7 @@ export class PhysicsWorld {
   movePlayer(socketId, x, z) {
     const body = this._playerBodies.get(socketId);
     if (!body) return;
-    body.setNextKinematicTranslation({ x, y: PLAYER_Y, z });
+    body.setNextKinematicTranslation({ x, y: terrainHeight(x, z) + PLAYER_Y, z });
   }
 
   getPlayerTranslation(socketId) {
@@ -134,22 +139,35 @@ export class PhysicsWorld {
   // ─── Private builders ───────────────────────────────────────────────────────
 
   _buildFloor() {
+    // Heightfield collider sampling the SHARED terrainHeight() so the ball rolls
+    // on exactly the same relief the client renders. Index mapping verified
+    // empirically: heights[r*(N+1)+c], x = row axis, z = column axis, scale.y = 1.
+    const N    = TERRAIN_SEGMENTS;
+    const SIZE = TERRAIN_SIZE;
+    const heights = new Float32Array((N + 1) * (N + 1));
+    for (let r = 0; r <= N; r++) {
+      const x = -SIZE / 2 + (r / N) * SIZE;
+      for (let c = 0; c <= N; c++) {
+        const z = -SIZE / 2 + (c / N) * SIZE;
+        heights[r * (N + 1) + c] = terrainHeight(x, z);
+      }
+    }
     const body = this._world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     this._world.createCollider(
-      RAPIER.ColliderDesc.cuboid(30, 0.05, 30)
-        .setTranslation(0, -0.05, 0)
+      RAPIER.ColliderDesc.heightfield(N, N, heights, { x: SIZE, y: 1, z: SIZE })
+        .setFriction(0.6)
         .setCollisionGroups(CGRP_WORLD),
       body,
     );
   }
 
   _buildWalls() {
-    // [cx, cy, cz, hx, hy, hz]
+    // [cx, cy, cz, hx, hy, hz] — perimeter at ±36 m, tall enough to clear the relief
     const walls = [
-      [  0, 2,  25, 25, 2, 0.5],   // north
-      [  0, 2, -25, 25, 2, 0.5],   // south
-      [ 25, 2,   0, 0.5, 2, 25],   // east
-      [-25, 2,   0, 0.5, 2, 25],   // west
+      [  0, 2.5,  36, 38, 3, 0.5],   // north
+      [  0, 2.5, -36, 38, 3, 0.5],   // south
+      [ 36, 2.5,   0, 0.5, 3, 38],   // east
+      [-36, 2.5,   0, 0.5, 3, 38],   // west
     ];
     for (const [cx, cy, cz, hx, hy, hz] of walls) {
       const body = this._world.createRigidBody(

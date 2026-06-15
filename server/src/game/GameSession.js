@@ -40,6 +40,7 @@ import {
   MATCH_PUSH,
 } from '@core-rivals/shared/constants/SocketEvents';
 import { applyMovement }     from '@core-rivals/shared/movement/MovementUtils';
+import { terrainHeight }     from '@core-rivals/shared/terrain/TerrainUtils';
 import { computeSwingForce } from '@core-rivals/shared/utils/SwingUtils';
 import { PhysicsWorld }      from '../physics/PhysicsWorld.js';
 import { ScoreManager }      from './ScoreManager.js';
@@ -100,7 +101,7 @@ export class GameSession {
         character:      p.character,
         slot:           p.slot,
         x:              spawn.x,
-        y:              0,
+        y:              terrainHeight(spawn.x, spawn.z),
         z:              spawn.z,
         yaw:            0,
         lastInputSeq:   -1,
@@ -207,8 +208,10 @@ export class GameSession {
     for (const [socketId, queue] of this._inputQueues) {
       const player = this._players.get(socketId);
       if (!player) continue;
+      const moveScale = CHARACTER_STATS[player.character]?.stats?.moveScale ?? 1;
       while (queue.length > 0) {
         const input = queue.shift();
+        input.speedScale = moveScale;            // server-authoritative per-character speed
         const next  = applyMovement(player, input);
         player.x          = next.x;
         player.z          = next.z;
@@ -236,10 +239,11 @@ export class GameSession {
     // 8. Step Rapier
     this._physics.step();
 
-    // 9. Read back actual player positions from Rapier
+    // 9. Read back actual player positions from Rapier; keep feet on the terrain
     for (const [socketId, player] of this._players) {
       const t = this._physics.getPlayerTranslation(socketId);
       if (t) { player.x = t.x; player.z = t.z; }
+      player.y = terrainHeight(player.x, player.z);
     }
 
     // 10. Goal detection
@@ -272,10 +276,11 @@ export class GameSession {
     }
     this._pendingBlocks.clear();
 
-    // Enforce max block duration
+    // Enforce max block duration (Resistencia → bloqueo más largo)
     for (const player of this._players.values()) {
       if (player.isBlocking && player.blockStartTick >= 0) {
-        if (this._tick - player.blockStartTick >= BLOCK_MAX_TICKS) {
+        const maxTicks = Math.ceil(BLOCK_MAX_TICKS * (CHARACTER_STATS[player.character]?.stats?.blockDurationScale ?? 1));
+        if (this._tick - player.blockStartTick >= maxTicks) {
           player.isBlocking     = false;
           player.blockStartTick = -1;
         }
@@ -424,16 +429,22 @@ export class GameSession {
       if (!item || item.type !== 'golf_club') continue;
       if (item.id !== data.itemId) continue;
 
+      const charStats = CHARACTER_STATS[player.character]?.stats ?? { swingPower: 1 };
+
+      // Reacción → cadencia de golpe (menor cooldown para mejor reacción)
+      const cdTicks  = Math.ceil(SWING_COOLDOWN_TICKS * (charStats.swingCooldownScale ?? 1));
       const lastTick = this._lastSwingTick.get(socketId) ?? -Infinity;
-      if (this._tick - lastTick < SWING_COOLDOWN_TICKS) continue;
+      if (this._tick - lastTick < cdTicks) continue;
 
       const ball = this._physics.getBallState();
       const dx   = ball.x - player.x;
       const dz   = ball.z - player.z;
       if (dx * dx + dz * dz > SWING_REACH * SWING_REACH) continue;
 
-      const charStats = CHARACTER_STATS[player.character]?.stats ?? { swingPower: 1 };
-      const force     = computeSwingForce(data.power, data.yaw, charStats);
+      // Precisión → dispersión angular del tiro (server-authoritative)
+      const spread = charStats.accuracySpread ?? 0;
+      const aimYaw = data.yaw + (Math.random() * 2 - 1) * spread;
+      const force  = computeSwingForce(data.power, aimYaw, charStats);
       this._physics.applyBallImpulse(force.fx, force.fy, force.fz);
 
       this._lastSwingTick.set(socketId, this._tick);

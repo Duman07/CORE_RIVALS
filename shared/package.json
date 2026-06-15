@@ -8,6 +8,7 @@
     "./constants/GameConstants": "./constants/GameConstants.js",
     "./constants/SocketEvents": "./constants/SocketEvents.js",
     "./movement/MovementUtils": "./movement/MovementUtils.js",
+    "./terrain/TerrainUtils":   "./terrain/TerrainUtils.js",
     "./utils/SwingUtils":       "./utils/SwingUtils.js"
   }
 }

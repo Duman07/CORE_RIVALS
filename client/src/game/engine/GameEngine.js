@@ -26,8 +26,10 @@ import { GolfClubMesh }       from '../entities/GolfClubMesh.js';
 import { ItemPickupSystem }   from '../systems/ItemPickupSystem.js';
 import { SwingController }    from '../systems/SwingController.js';
 import { CombatController }   from '../systems/CombatController.js';
+import { GroundSampler }      from '../systems/GroundSampler.js';
 import { modelLoader }        from '../loaders/ModelLoader.js';
 import { SPAWN_POSITIONS }    from '@core-rivals/shared/constants/GameConstants';
+import { terrainHeight }      from '@core-rivals/shared/terrain/TerrainUtils';
 
 export class GameEngine {
   /**
@@ -64,6 +66,7 @@ export class GameEngine {
     this._itemPickup   = null;
     this._swing        = null;
     this._combat       = null;
+    this._ground       = null;
 
     this._localPlayer   = null;
     /** @type {Map<string, RemotePlayer>} */
@@ -72,6 +75,8 @@ export class GameEngine {
 
     /** @type {Map<string, GolfClubMesh>} itemId → mesh */
     this._clubMeshes      = new Map();
+    /** @type {Map<string, string|null>} itemId → ownerId currently attached to a hand bone */
+    this._clubAttach      = new Map();
     /** @type {Array<object>} latest items snapshot from server */
     this._latestItems     = null;
     /** @type {Map<string, {x:number,y:number,z:number,yaw:number}>} */
@@ -136,7 +141,9 @@ export class GameEngine {
 
   _initScene() {
     this._scene = new THREE.Scene();
-    buildArenaScene(this._scene, this._renderer);
+    const terrain = buildArenaScene(this._scene, this._renderer);
+    this._ground  = new GroundSampler();
+    if (terrain?.ground) this._ground.setTarget(terrain.ground);
   }
 
   _initEntities() {
@@ -234,7 +241,13 @@ export class GameEngine {
     const localXZ = lp ? { x: lp.x, z: lp.z } : null;
     this._combat.setPositions(localXZ, this._remoteXZ);
 
+    // Walk-over auto-pickup: emit GAME_PICKUP when standing on an available club
+    this._itemPickup.update(localXZ, this._latestItems);
+
     for (const rp of this._remotePlayers.values()) rp.update();
+
+    // Slope tilt: raycast the ground and align each character to the surface normal
+    this._applyGroundTilt();
 
     this._ball.update();
 
@@ -271,25 +284,85 @@ export class GameEngine {
 
       if (!this._clubMeshes.has(itemState.id)) {
         this._clubMeshes.set(itemState.id, new GolfClubMesh(this._scene));
+        this._clubAttach.set(itemState.id, null);
       }
-      const mesh = this._clubMeshes.get(itemState.id);
+      const mesh          = this._clubMeshes.get(itemState.id);
+      const attachedOwner = this._clubAttach.get(itemState.id) ?? null;
 
+      // ── On the ground ──
       if (itemState.ownerId === null) {
-        mesh.setGroundPose(itemState.x, itemState.z);
+        if (attachedOwner) {
+          this._detachClub(attachedOwner, mesh);
+          this._clubAttach.set(itemState.id, null);
+        }
+        mesh.setGroundPose(itemState.x, terrainHeight(itemState.x, itemState.z), itemState.z);
+        continue;
+      }
+
+      // ── Held: already parented to the owner's hand bone ──
+      if (attachedOwner === itemState.ownerId) continue;
+
+      // Owner changed → detach from the previous owner first
+      if (attachedOwner && attachedOwner !== itemState.ownerId) {
+        this._detachClub(attachedOwner, mesh);
+        this._clubAttach.set(itemState.id, null);
+      }
+
+      // Try to attach to the GLB hand bone (removes it from the floor)
+      const owner = this._entityFor(itemState.ownerId);
+      if (owner && owner.hasHandBone && owner.attachClub(mesh.object3D)) {
+        mesh.object3D.visible = true;
+        this._clubAttach.set(itemState.id, itemState.ownerId);
+        continue;
+      }
+
+      // Fallback while the GLB loads / no hand bone: hold at the player's side
+      let pos = this._playerPositions.get(itemState.ownerId);
+      if (!pos && itemState.ownerId === this._myId && this._localPlayer?.position) {
+        const p = this._localPlayer.position;
+        pos = { x: p.x, y: p.y, z: p.z, yaw: this._input.yaw };
+      }
+      if (pos) {
+        const yaw = itemState.ownerId === this._myId ? this._input.yaw : (pos.yaw ?? 0);
+        mesh.setHeldPose(pos.x, pos.y, pos.z, yaw);
       } else {
-        let pos = this._playerPositions.get(itemState.ownerId);
-        if (!pos && itemState.ownerId === this._myId && this._localPlayer?.position) {
-          const p = this._localPlayer.position;
-          pos = { x: p.x, y: p.y, z: p.z, yaw: this._input.yaw };
-        }
-        if (pos) {
-          const yaw = itemState.ownerId === this._myId ? this._input.yaw : (pos.yaw ?? 0);
-          mesh.setHeldPose(pos.x, pos.y, pos.z, yaw);
-        } else {
-          mesh.hide();
-        }
+        mesh.hide();
       }
     }
+  }
+
+  /** Raycast the ground under each character and tilt it to the slope normal. */
+  _applyGroundTilt() {
+    if (!this._ground) return;
+    if (this._localPlayer?.position) {
+      const p = this._localPlayer.position;
+      const s = this._ground.sample(p.x, p.z);
+      if (s) this._localPlayer.groundAlign(s.nx, s.ny, s.nz);
+    }
+    for (const rp of this._remotePlayers.values()) {
+      const p = rp.position;
+      if (!p) continue;
+      const s = this._ground.sample(p.x, p.z);
+      if (s) rp.groundAlign(s.nx, s.ny, s.nz);
+    }
+  }
+
+  /** Resolve a socketId to its player entity (local or remote). */
+  _entityFor(socketId) {
+    if (socketId === this._myId) return this._localPlayer;
+    return this._remotePlayers.get(socketId) ?? null;
+  }
+
+  /** Detach a club mesh from an owner's hand bone and return it to the scene. */
+  _detachClub(ownerId, mesh) {
+    const e = this._entityFor(ownerId);
+    if (e) {
+      e.detachClub(mesh.object3D);
+    } else if (mesh.object3D.parent) {
+      mesh.object3D.parent.remove(mesh.object3D);
+    }
+    this._scene.add(mesh.object3D);
+    mesh.object3D.scale.setScalar(1);
   }
 
   // ─── Resize ─────────────────────────────────────────────────────────────────

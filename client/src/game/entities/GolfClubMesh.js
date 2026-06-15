@@ -31,10 +31,14 @@ export class GolfClubMesh {
 
   // ─── Pose setters ────────────────────────────────────────────────────────────
 
-  /** Club lying on the ground at world coordinates. */
-  setGroundPose(x, z) {
+  /** The underlying Object3D (so it can be parented to a hand bone). */
+  get object3D() { return this._group; }
+
+  /** Club lying on the ground at world coordinates (y = terrain height). */
+  setGroundPose(x, y, z) {
     this._group.visible = true;
-    this._group.position.set(x, 0.12, z);
+    this._group.scale.setScalar(1);
+    this._group.position.set(x, (y ?? 0) + 0.12, z);
     this._group.rotation.set(Math.PI * 0.45, 0.4, 0);
   }
 

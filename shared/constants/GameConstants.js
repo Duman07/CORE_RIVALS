@@ -12,29 +12,65 @@ export const CORE_DWELL_TIME      = 0.5;   // seconds the sphere must stay insid
 // ─── Characters ───────────────────────────────────────────────────────────────
 export const CHARACTERS = ['duman', 'moises', 'sebastian'];
 
+/**
+ * Atributos base por personaje (escala 1-10, definidos por diseño).
+ * De aquí se DERIVAN todos los multiplicadores de juego (ver deriveStats).
+ *   precision  → puntería del tiro (menos dispersión)
+ *   estrategia → metadato (sistemas futuros: IA, info de mapa)
+ *   reaccion   → cadencia de golpe (menor cooldown)
+ *   fuerza     → potencia del tiro y del empuje
+ *   resistencia→ duración máxima de bloqueo
+ *   movilidad  → velocidad de movimiento
+ *   competitividad → bonus de empuje (agresividad) + metadato
+ */
+export const CHARACTER_ATTRIBUTES = {
+  moises:    { precision: 9, estrategia: 10, reaccion: 4, fuerza: 3, resistencia: 8, movilidad: 5, competitividad: 8 },
+  sebastian: { precision: 9, estrategia: 8,  reaccion: 7, fuerza: 7, resistencia: 4, movilidad: 5, competitividad: 6 },
+  duman:     { precision: 7, estrategia: 5,  reaccion: 9, fuerza: 9, resistencia: 7, movilidad: 8, competitividad: 9 },
+};
+
+const _clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// Multiplicador lineal centrado en el valor 6 (neutral = 1.0).
+const _k = (v, perPoint) => 1 + (v - 6) * perPoint;
+
+/** Convierte los atributos 1-10 en multiplicadores de juego. */
+export function deriveStats(a) {
+  return {
+    moveScale:          _clamp(_k(a.movilidad, 0.035), 0.85, 1.20),
+    swingPower:         _clamp(_k(a.fuerza, 0.045) * _k(a.precision, 0.010), 0.80, 1.25),
+    pushForce:          _clamp(_k(a.fuerza, 0.040) * _k(a.competitividad, 0.015), 0.80, 1.30),
+    accuracySpread:     _clamp(0.10 * (1 - (a.precision - 1) / 9), 0, 0.10), // rad σ; prec 10 → ~0
+    swingCooldownScale: _clamp(_k(a.reaccion, -0.030), 0.80, 1.20),          // más reacción → menos cooldown
+    blockDurationScale: _clamp(_k(a.resistencia, 0.050), 0.70, 1.30),
+  };
+}
+
 export const CHARACTER_STATS = {
   duman: {
     displayName: 'Duman',
     role: 'El Físico',
-    description: 'Fuerza bruta. Domina el cuerpo a cuerpo y los golpes potentes.',
-    stats: { swingPower: 1.05, arrowSpeed: 0.95, pushForce: 1.08, gripStrength: 0.92, agility: 0.95 },
+    description: 'Fuerza bruta. Reflejos fulminantes y golpes potentes.',
+    attributes: CHARACTER_ATTRIBUTES.duman,
+    stats:      deriveStats(CHARACTER_ATTRIBUTES.duman),
   },
   moises: {
     displayName: 'Moisés',
     role: 'El Estratega',
-    description: 'Precisión técnica. Analítico, resistente mentalmente.',
-    stats: { swingPower: 1.00, arrowSpeed: 1.02, pushForce: 0.95, gripStrength: 1.00, agility: 1.00 },
+    description: 'Precisión técnica. Analítico y resistente mentalmente.',
+    attributes: CHARACTER_ATTRIBUTES.moises,
+    stats:      deriveStats(CHARACTER_ATTRIBUTES.moises),
   },
   sebastian: {
     displayName: 'Sebastián',
-    role: 'El Precisión',
-    description: 'Vista de águila. Reflejos fulminantes y pulso quirúrgico.',
-    stats: { swingPower: 0.97, arrowSpeed: 1.05, pushForce: 0.97, gripStrength: 1.05, agility: 1.03 },
+    role: 'El Preciso',
+    description: 'Vista de águila. Pulso quirúrgico y buena reacción.',
+    attributes: CHARACTER_ATTRIBUTES.sebastian,
+    stats:      deriveStats(CHARACTER_ATTRIBUTES.sebastian),
   },
 };
 
 // ─── Items ────────────────────────────────────────────────────────────────────
-export const PICKUP_RADIUS        = 1.2;   // metres to pick up an item
+export const PICKUP_RADIUS        = 1.8;   // metres to pick up an item (walk-over auto-pickup)
 export const DISARM_RADIUS        = 1.0;   // metres to disarm
 export const ITEM_RESPAWN_DELAY   = 20;    // seconds
 
@@ -60,9 +96,9 @@ export const BLOCK_COOLDOWN       = 3.0;   // seconds
 export const DISARM_COOLDOWN      = 2.0;   // seconds
 
 // ─── Map ──────────────────────────────────────────────────────────────────────
-export const MAP_RADIUS           = 20;    // metres
-export const CORE_DISTANCE        = 10;    // metres from centre
-export const ITEM_SPAWN_DISTANCE  = 7;     // metres from centre
+export const MAP_RADIUS           = 34;    // metres (scaled-up golf-course field)
+export const CORE_DISTANCE        = 30;    // metres from centre
+export const ITEM_SPAWN_DISTANCE  = 12;    // metres from centre
 
 // ─── Ball (Phase 4) ───────────────────────────────────────────────────────────
 export const BALL_RADIUS = 0.25;   // metres — visible game ball
@@ -72,23 +108,23 @@ export const BALL_SPAWN  = Object.freeze({ x: 0, y: 2, z: 0 });
 export const CORE_RADIUS = 1.5;    // metres — flat distance detection
 
 // Core[i] belongs to the player in slot i+1.
-// Equilateral triangle at circumradius 18 m (spawn positions are at 10 m).
+// Equilateral triangle at circumradius 30 m (spawn positions are at 17 m).
 export const CORE_POSITIONS = Object.freeze([
-  Object.freeze({ x:  0,    y: 0, z: -18 }),
-  Object.freeze({ x:  15.6, y: 0, z:   9 }),
-  Object.freeze({ x: -15.6, y: 0, z:   9 }),
+  Object.freeze({ x:  0,  y: 0, z: -30 }),
+  Object.freeze({ x:  26, y: 0, z:  15 }),
+  Object.freeze({ x: -26, y: 0, z:  15 }),
 ]);
 
 // ─── Movement (Phase 3) ───────────────────────────────────────────────────────
 export const MOVE_SPEED    = 5;    // m/s walk
 export const SPRINT_SPEED  = 8;    // m/s sprint
-export const ARENA_SIZE    = 24;   // half-size — player stays within +-24 m
+export const ARENA_SIZE    = 34;   // half-size — player stays within +-34 m
 
-// Equidistant spawn points (circumradius 10 m, slot index 0-2)
+// Equidistant spawn points (circumradius 17 m, slot index 0-2)
 export const SPAWN_POSITIONS = [
-  { x:  0,     y: 0, z: -10 },   // slot 1 — north
-  { x:  8.66,  y: 0, z:  5  },   // slot 2 — south-east
-  { x: -8.66,  y: 0, z:  5  },   // slot 3 — south-west
+  { x:   0,    y: 0, z: -17  },   // slot 1 — north
+  { x:  14.72, y: 0, z:   8.5 },  // slot 2 — south-east
+  { x: -14.72, y: 0, z:   8.5 },  // slot 3 — south-west
 ];
 
 // Three.js hex colour per character
@@ -99,15 +135,15 @@ export const CHARACTER_COLORS = {
 };
 
 // ─── Golf (Phase 5) ──────────────────────────────────────────────────────────
-// Club spawn points — between centre and each player spawn (~6–7 m radius)
+// Club spawn points — between centre and each player spawn (~12 m radius)
 export const CLUB_SPAWN_POSITIONS = Object.freeze([
-  Object.freeze({ x:  0,    y: 0, z: -7   }),  // near slot 1 (north)
-  Object.freeze({ x:  6.06, y: 0, z:  3.5 }),  // near slot 2 (south-east)
-  Object.freeze({ x: -6.06, y: 0, z:  3.5 }),  // near slot 3 (south-west)
+  Object.freeze({ x:   0,    y: 0, z: -12 }),  // near slot 1 (north)
+  Object.freeze({ x:  10.39, y: 0, z:   6 }),  // near slot 2 (south-east)
+  Object.freeze({ x: -10.39, y: 0, z:   6 }),  // near slot 3 (south-west)
 ]);
 
-export const SWING_MAX_IMPULSE   = 2.5;  // N·s — impulse at full power (−50% balance pass)
-export const SWING_LOFT_FACTOR   = 0.8;  // N·s upward component (−60% balance pass — less loft)
+export const SWING_MAX_IMPULSE   = 6.0;  // N·s — impulse at full power (golf-realistic: ~28 m carry+roll on the scaled field)
+export const SWING_LOFT_FACTOR   = 1.5;  // N·s upward component (gives a real arc; putts at low power barely lift)
 export const SWING_REACH         = 3.5;  // m — max player↔ball dist for valid swing
 export const SWING_CHARGE_TIME   = 1.5;  // s — time from 0 to full charge (client)
 export const SWING_COOLDOWN_SECS = 1.5;  // s — cooldown between swings (server gate + client visual)
