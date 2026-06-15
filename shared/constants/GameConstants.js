@@ -100,6 +100,12 @@ export const MAP_RADIUS           = 34;    // metres (scaled-up golf-course fiel
 export const CORE_DISTANCE        = 30;    // metres from centre
 export const ITEM_SPAWN_DISTANCE  = 12;    // metres from centre
 
+// Perimeter boundary — translucent "glass" the ball bounces off. Shared by the
+// server (physics walls) and the client (visual panels) so they always match.
+export const WALL_HALF            = 36;    // metres — half-extent of the square boundary
+export const WALL_HEIGHT          = 8;     // metres — visible/physical wall height (clears the shot arc)
+export const WALL_RESTITUTION     = 0.8;   // bounciness of the boundary
+
 // ─── Ball (Phase 4) ───────────────────────────────────────────────────────────
 export const BALL_RADIUS = 0.25;   // metres — visible game ball
 export const BALL_SPAWN  = Object.freeze({ x: 0, y: 2, z: 0 });
@@ -142,8 +148,9 @@ export const CLUB_SPAWN_POSITIONS = Object.freeze([
   Object.freeze({ x: -10.39, y: 0, z:   6 }),  // near slot 3 (south-west)
 ]);
 
-export const SWING_MAX_IMPULSE   = 6.0;  // N·s — impulse at full power (golf-realistic: ~28 m carry+roll on the scaled field)
-export const SWING_LOFT_FACTOR   = 1.5;  // N·s upward component (gives a real arc; putts at low power barely lift)
+export const SWING_MAX_IMPULSE   = 7.0;  // N·s — total impulse magnitude at full power
+export const SWING_LAUNCH_ANGLE  = 0.576; // rad (~33°) — golf loft: ball lifts into an arc then lands and rolls
+export const SWING_LOFT_FACTOR   = 1.5;  // (legacy) kept for backward compatibility
 export const SWING_REACH         = 3.5;  // m — max player↔ball dist for valid swing
 export const SWING_CHARGE_TIME   = 1.5;  // s — time from 0 to full charge (client)
 export const SWING_COOLDOWN_SECS = 1.5;  // s — cooldown between swings (server gate + client visual)

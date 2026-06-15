@@ -9,6 +9,7 @@
     "./constants/SocketEvents": "./constants/SocketEvents.js",
     "./movement/MovementUtils": "./movement/MovementUtils.js",
     "./terrain/TerrainUtils":   "./terrain/TerrainUtils.js",
+    "./arena/ArenaLayout":      "./arena/ArenaLayout.js",
     "./utils/SwingUtils":       "./utils/SwingUtils.js"
   }
 }

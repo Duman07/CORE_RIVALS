@@ -13,7 +13,7 @@
  *   - Columnas centrales de piedra -> cobertura junto a la esfera.
  */
 
-import * as THREE from 'three';
+import * as THREE from './_three_stub.mjs';
 import {
   SPAWN_POSITIONS,
   CHARACTER_COLORS,
@@ -23,14 +23,14 @@ import {
   BALL_SPAWN,
   WALL_HALF,
   WALL_HEIGHT,
-} from '@core-rivals/shared/constants/GameConstants';
+} from './shared/constants/GameConstants.js';
 import {
   terrainHeight,
   terrainNormal,
   TERRAIN_SIZE,
   TERRAIN_SEGMENTS,
-} from '@core-rivals/shared/terrain/TerrainUtils';
-import { getObstacles, SURFACES } from '@core-rivals/shared/arena/ArenaLayout';
+} from './shared/terrain/TerrainUtils.js';
+import { getObstacles, SURFACES } from './shared/arena/ArenaLayout.js';
 
 // Paleta del terreno
 const COLOR = {
