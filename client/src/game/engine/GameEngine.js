@@ -30,6 +30,7 @@ import { GroundSampler }      from '../systems/GroundSampler.js';
 import { modelLoader }        from '../loaders/ModelLoader.js';
 import { SPAWN_POSITIONS }    from '@core-rivals/shared/constants/GameConstants';
 import { terrainHeight }      from '@core-rivals/shared/terrain/TerrainUtils';
+import { MATCH_EVENT, MATCH_PUSH } from '@core-rivals/shared/constants/SocketEvents';
 
 export class GameEngine {
   /**
@@ -67,6 +68,7 @@ export class GameEngine {
     this._swing        = null;
     this._combat       = null;
     this._ground       = null;
+    this._prevSwingState = 'IDLE';
 
     this._localPlayer   = null;
     /** @type {Map<string, RemotePlayer>} */
@@ -112,6 +114,8 @@ export class GameEngine {
     this._itemPickup?.dispose();
     this._swing?.dispose();
     this._combat?.dispose();
+    if (this._onMatchEvent) this._socket.off(MATCH_EVENT, this._onMatchEvent);
+    if (this._onMatchPush)  this._socket.off(MATCH_PUSH,  this._onMatchPush);
     this._network?.unlisten();
     this._localPlayer?.dispose();
     for (const rp of this._remotePlayers.values()) rp.dispose();
@@ -208,6 +212,20 @@ export class GameEngine {
       if (scores && this._onScores) this._onScores(scores);
     });
     this._network.listen();
+
+    // Action animations driven by server-authoritative events (covers everyone,
+    // local and remote, since the server broadcasts to all clients).
+    this._onMatchEvent = (e) => {
+      // Local golf is driven by charge/release; only animate remote swings here.
+      if (e?.type === 'swing' && e.playerId !== this._myId) {
+        this._entityFor(e.playerId)?.playAction('golf');
+      }
+    };
+    this._onMatchPush = (e) => {
+      this._entityFor(e?.pusherId)?.playAction('punch');
+    };
+    this._socket.on(MATCH_EVENT, this._onMatchEvent);
+    this._socket.on(MATCH_PUSH,  this._onMatchPush);
   }
 
   // ─── Render loop ────────────────────────────────────────────────────────────
@@ -236,6 +254,15 @@ export class GameEngine {
     this._swing.setYaw(this._input.yaw);
     this._swing.update(dt);
 
+    // Drive the LOCAL golf animation from charge state: back-swing + hold while
+    // charging, finish the swing on release.
+    const swingState = this._swing.state;
+    if (swingState !== this._prevSwingState) {
+      if (swingState === 'CHARGING') this._localPlayer?.startSwingCharge();
+      else if (this._prevSwingState === 'CHARGING') this._localPlayer?.releaseSwing();
+      this._prevSwingState = swingState;
+    }
+
     // Phase 6: feed latest positions to CombatController
     const lp = this._localPlayer?.position ?? null;
     const localXZ = lp ? { x: lp.x, z: lp.z } : null;
@@ -248,6 +275,10 @@ export class GameEngine {
 
     // Slope tilt: raycast the ground and align each character to the surface normal
     this._applyGroundTilt();
+
+    // Animations: idle/walk derived from speed; golf/punch are event-driven
+    this._localPlayer?.updateAnim(dt);
+    for (const rp of this._remotePlayers.values()) rp.updateAnim(dt);
 
     this._ball.update();
 

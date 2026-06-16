@@ -12,10 +12,12 @@ import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { modelLoader, MODEL_CONFIG } from '../loaders/ModelLoader.js';
 import { CHARACTER_COLORS }          from '@core-rivals/shared/constants/GameConstants';
+import { AnimationController }        from './AnimationController.js';
 
 const LABEL_CANVAS_W = 256;
 const LABEL_CANVAS_H = 52;
 const LABEL_Y        = 2.15;
+const GRIP_LOCAL_Y   = 0.95;  // height of the club grip in GolfClubMesh local space
 
 function buildNameSprite(name, isLocal) {
   const canvas = document.createElement('canvas');
@@ -74,6 +76,8 @@ export class PlayerMesh {
     this._character = character;
     this._isLocal   = isLocal;
     this._handBone  = null;
+    this._anim      = null;
+    this._lastAnimPos = new THREE.Vector3();
 
     const color    = CHARACTER_COLORS[character] ?? 0x888888;
     this._fallback = buildCapsule(color);
@@ -93,6 +97,32 @@ export class PlayerMesh {
     this._root.position.set(x, y, z);
     this._root.rotation.y = yaw;
   }
+
+  // ─── Animation ────────────────────────────────────────────────────────────────
+
+  /** Advance animations; derives walk/idle from movement speed. */
+  update(dt) {
+    if (!this._anim) return;
+    const p = this._root.position;
+    if (dt > 0) {
+      const dx = p.x - this._lastAnimPos.x;
+      const dz = p.z - this._lastAnimPos.z;
+      this._anim.setSpeed(Math.hypot(dx, dz) / dt);
+    }
+    this._lastAnimPos.set(p.x, p.y, p.z);
+    this._anim.update(dt);
+  }
+
+  /** Trigger a one-shot action: 'golf' | 'punch'. */
+  playAction(name) {
+    this._anim?.playAction(name);
+  }
+
+  /** Golf charge: start back-swing + hold (local player while holding Space). */
+  startSwingCharge() { this._anim?.startCharge(); }
+
+  /** Golf release: finish the down-swing (on Space release). */
+  releaseSwing() { this._anim?.releaseCharge(); }
 
   /**
    * Tilt the character so its up-axis follows the ground slope normal,
@@ -124,10 +154,12 @@ export class PlayerMesh {
     this._handBone.getWorldScale(s);
     const inv = 1 / (s.x || 1);
     object3D.scale.setScalar(inv);
-    // Small local offset/orientation so the grip sits in the palm. Bone frames
-    // vary per rig, so these are sensible defaults to fine-tune visually.
-    object3D.position.set(0, 0.02 * inv, 0);
-    object3D.rotation.set(Math.PI / 2, 0, 0);
+    // Club orientation within the hand (tweak per rig if the grip looks off).
+    const rot = new THREE.Euler(Math.PI / 2, 0, 0);
+    object3D.rotation.copy(rot);
+    // Place the GRIP (top of the club) in the palm — not the club head.
+    const grip = new THREE.Vector3(0, GRIP_LOCAL_Y * inv, 0).applyEuler(rot);
+    object3D.position.set(-grip.x, -grip.y, -grip.z);
     this._handBone.add(object3D);
     return true;
   }
@@ -141,6 +173,7 @@ export class PlayerMesh {
   }
 
   dispose() {
+    this._anim?.dispose();
     this._scene.remove(this._root);
     this._root.traverse((obj) => {
       if (!obj.isMesh) return;
@@ -164,6 +197,7 @@ export class PlayerMesh {
       this._root.add(model);
       this._model    = model;
       this._handBone = this._findHandBone(model);
+      this._anim     = new AnimationController(model, character);
 
       const box = new THREE.Box3().setFromObject(model);
       this._label.position.y = (box.max.y > 0.1 ? box.max.y : 1.75) + 0.35;

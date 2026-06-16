@@ -121,4 +121,8 @@ export class RemotePlayer {
   // ─── Terrain ──────────────────────────────────────────────────────────────────
   get position()           { return this._pos; }
   groundAlign(nx, ny, nz)  { this._mesh.applyGroundNormal(nx, ny, nz); }
+
+  // ─── Animation ──────────────────────────────────────────────────────────────────
+  updateAnim(dt)   { this._mesh.update(dt); }
+  playAction(name) { this._mesh.playAction(name); }
 }

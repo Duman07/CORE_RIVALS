@@ -16,6 +16,7 @@
  */
 
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FBXLoader }  from 'three/examples/jsm/loaders/FBXLoader.js';
 
 /** Public URL paths — files must live in client/public/assets/models/ */
 const MODEL_PATHS = {
@@ -23,6 +24,20 @@ const MODEL_PATHS = {
   moises:    '/assets/models/Moises.glb',
   sebastian: '/assets/models/Sebastian.glb',
 };
+
+/** Per-character Mixamo FBX animation clips (folder per character). */
+const ANIM_DIR = {
+  duman:     '/assets/models/Duman',
+  moises:    '/assets/models/Moises',
+  sebastian: '/assets/models/Sebastian',
+};
+const ANIM_FILES = {
+  idle:  'Happy Idle.fbx',
+  walk:  'Walking.fbx',
+  golf:  'Golf Drive.fbx',
+  punch: 'Punching.fbx',
+};
+export const ANIM_KEYS = Object.keys(ANIM_FILES);
 
 /**
  * Per-character visual corrections applied after loading.
@@ -42,9 +57,40 @@ export const MODEL_CONFIG = {
 
 class ModelLoaderSingleton {
   constructor() {
-    this._loader = new GLTFLoader();
+    this._loader    = new GLTFLoader();
+    this._fbxLoader = new FBXLoader();
     /** @type {Map<string, Promise>} character → Promise<GLTF> */
     this._cache = new Map();
+    /** @type {Map<string, Promise>} `${character}:${key}` → Promise<AnimationClip> */
+    this._animCache = new Map();
+  }
+
+  /**
+   * Load one Mixamo FBX animation and return its AnimationClip (cached).
+   * @param {string} character @param {string} key — idle|walk|golf|punch
+   * @returns {Promise<import('three').AnimationClip>}
+   */
+  loadAnimation(character, key) {
+    const id = `${character}:${key}`;
+    if (this._animCache.has(id)) return this._animCache.get(id);
+
+    const dir  = ANIM_DIR[character];
+    const file = ANIM_FILES[key];
+    if (!dir || !file) return Promise.reject(new Error(`[ModelLoader] Unknown anim ${id}`));
+
+    const url = `${dir}/${encodeURIComponent(file)}`;
+    const promise = this._fbxLoader.loadAsync(url).then((fbx) => {
+      const clip = fbx.animations && fbx.animations[0];
+      if (!clip) throw new Error(`[ModelLoader] No clip in ${url}`);
+      clip.name = key;
+      return clip;
+    }).catch((err) => {
+      this._animCache.delete(id);
+      throw err;
+    });
+
+    this._animCache.set(id, promise);
+    return promise;
   }
 
   /**
